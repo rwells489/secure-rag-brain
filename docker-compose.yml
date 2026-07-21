@@ -1,0 +1,43 @@
+# Secure RAG Brain - Docker Compose for Local Development
+
+version: '3.8'
+
+services:
+  # Local Supabase (requires supabase CLI: supabase start)
+  # This is an alternative - prefer `supabase start` for full stack
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack for AWS services simulation
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"        # Edge port
+      - "4510-4559:4510-4559"  # External ports
+    environment:
+      - SERVICES=s3,lambda,apigateway,iam,sts,logs
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
+  localstack-data:

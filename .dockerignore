@@ -1,0 +1,8 @@
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+# Build
+*.tar.gz
+*.zip

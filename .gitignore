@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AWS SAM
+.aws-sam/
+samconfig.toml
+
+# Supabase
+.supabase/
+supabase/.branches/
+supabase/.temp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Terraform (if used)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test artifacts
+.coverage
+coverage.xml
+junit.xml
+
+# OS / Editor
+*.swp
+*~
+.project
+.classpath
+.settings/

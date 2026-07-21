@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Secure RAG Brain - Serverless PII Triage Pipeline
+
+Parameters:
+  SupabaseUrl:
+    Type: String
+    Description: Supabase project URL
+  SupabaseServiceKey:
+    Type: String
+    Description: Supabase service role key (for RLS bypass)
+    NoEcho: true
+  S3BucketName:
+    Type: String
+    Description: S3 bucket for document uploads
+    Default: secure-rag-brain-documents
+
+Resources:
+  # S3 Bucket for document ingestion
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt TriageFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: ".txt"
+
+  # Lambda Function for PII Triage
+  TriageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: secure-rag-brain-triage
+      Runtime: python3.11
+      Handler: lambda_handler.lambda_handler
+      CodeUri: .
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SERVICE_KEY: !Ref SupabaseServiceKey
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "*"
+
+  # Permission for S3 to invoke Lambda
+  S3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TriageFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt DocumentsBucket.Arn
+
+  # API Gateway for manual invocation
+  TriageApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Auth:
+        DefaultAuthorizer: NONE
+        Authorizers:
+          FunctionAuthorizer:
+            FunctionArn: !GetAtt TriageFunction.Arn
+            FunctionPayloadType: REQUEST
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  # IAM Role for Lambda (least privilege)
+  TriageFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${S3BucketName}/*"
+
+Outputs:
+  TriageFunctionArn:
+    Value: !GetAtt TriageFunction.Arn
+    Description: ARN of the PII triage Lambda
+  TriageApiUrl:
+    Value: !Sub "https://${TriageApi}.execute-api.${AWS::Region}.amazonaws.com/prod/triage"
+    Description: API Gateway endpoint for manual triage
+  DocumentsBucketName:
+    Value: !Ref DocumentsBucket
+    Description: S3 bucket for document uploads

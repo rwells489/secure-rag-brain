@@ -1,0 +1,23 @@
+# CODEOWNERS
+# These users/groups will be automatically requested for review on matching files
+
+# Global owners
+* @rwells489
+
+# AWS Infrastructure
+/aws-infra/ @rwells489
+
+# Supabase (Database + Edge Functions)
+/supabase/ @rwells489
+
+# Frontend (Streamlit)
+/src/ @rwells489
+
+# CI/CD
+/.github/workflows/ @rwells489
+
+# Documentation
+/docs/ @rwells489
+/README.md @rwells489
+/ARCHITECTURE.md @rwells489
+/SECURITY.md @rwells489

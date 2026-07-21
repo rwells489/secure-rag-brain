@@ -1,0 +1,21 @@
+{
+  "name": "document-triage",
+  "version": "1.0.0",
+  "description": "Supabase Edge Function for document PII triage",
+  "main": "index.ts",
+  "scripts": {
+    "test": "deno test --allow-all",
+    "check": "deno check index.ts",
+    "fmt": "deno fmt index.ts",
+    "lint": "deno lint index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "deno": "^1.40.0"
+  },
+  "engines": {
+    "deno": ">=1.40.0"
+  }
+}

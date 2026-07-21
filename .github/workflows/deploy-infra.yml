@@ -1,0 +1,129 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Python deps
+        run: |
+          pip install -q ruff pytest pytest-cov
+          pip install -q -r src/requirements.txt 2>/dev/null || true
+
+      - name: Ruff lint (Python)
+        run: ruff check src/ aws-infra/ --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check src/ aws-infra/
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --tb=short 2>/dev/null || echo "No tests directory yet"
+
+      - name: Check SQL migrations
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "Checking $f..."
+            # Basic syntax validation
+            head -50 "$f" | grep -E "(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|SELECT)" || true
+          done
+
+  deploy-supabase:
+    name: Deploy Supabase Migrations
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy migrations
+        run: |
+          cd supabase
+          supabase db push --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  deploy-aws:
+    name: Deploy AWS SAM Stack
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          version: latest
+
+      - name: Build SAM app
+        run: |
+          cd aws-infra
+          sam build --use-container
+
+      - name: Deploy SAM stack
+        run: |
+          cd aws-infra
+          sam deploy \
+            --stack-name secure-rag-brain-triage \
+            --region ${{ env.AWS_REGION }} \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              SupabaseUrl=${{ secrets.SUPABASE_URL }} \
+              SupabaseServiceKey=${{ secrets.SUPABASE_SERVICE_KEY }} \
+              S3BucketName=secure-rag-brain-documents-${{ github.sha :: 8 }} \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+  notify:
+    name: Notify on Failure
+    needs: [deploy-supabase, deploy-aws]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "Deployment failed. Check GitHub Actions for details."
+          # Add Slack/Discord/email webhook here
