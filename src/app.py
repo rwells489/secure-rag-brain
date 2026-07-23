@@ -4,6 +4,8 @@ from datetime import datetime
 
 import streamlit as st
 
+from supabase import Client, create_client
+
 # Page configuration
 st.set_page_config(
     page_title="Secure RAG Brain — Enterprise Admin",
@@ -12,12 +14,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Initialize Supabase client
+@st.cache_resource
+def get_supabase_client(url: str, anon_key: str) -> Client:
+    return create_client(url, anon_key)
+
+# Initialize session state
+if "documents" not in st.session_state:
+    st.session_state.documents = []
+if "stats" not in st.session_state:
+    st.session_state.stats = {"total": 0, "approved": 0, "quarantined": 0, "pending": 0}
+if "supabase" not in st.session_state:
+    st.session_state.supabase = None
+
 # Custom CSS for professional blueprint aesthetic
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
-    
+
     :root {
         --bg-primary: #EEF2F1;
         --bg-secondary: #FFFFFF;
@@ -32,12 +47,12 @@ st.markdown(
         --text-secondary: #4A5568;
         --border-color: #D1D9E0;
     }
-    
+
     .stApp {
         background-color: var(--bg-primary);
         font-family: 'Inter', sans-serif;
     }
-    
+
     .main-header {
         font-family: 'JetBrains Mono', monospace;
         font-size: 1.5rem;
@@ -45,14 +60,14 @@ st.markdown(
         color: var(--text-primary);
         margin-bottom: 0.25rem;
     }
-    
+
     .main-caption {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.875rem;
         color: var(--text-secondary);
         margin-bottom: 2rem;
     }
-    
+
     .status-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
@@ -60,7 +75,7 @@ st.markdown(
         padding: 1.25rem;
         margin-bottom: 1rem;
     }
-    
+
     .status-indicator {
         display: inline-flex;
         align-items: center;
@@ -71,25 +86,25 @@ st.markdown(
         font-weight: 500;
         font-family: 'JetBrains Mono', monospace;
     }
-    
+
     .status-connected {
         background: var(--approved-bg);
         color: var(--approved-border);
         border: 1px solid var(--approved-border);
     }
-    
+
     .status-active {
         background: var(--accent-light);
         color: var(--accent-primary);
         border: 1px solid var(--accent-primary);
     }
-    
+
     .status-warning {
         background: #FEF3C7;
         color: #D97706;
         border: 1px solid #FBBF24;
     }
-    
+
     .quarantine-box {
         background: var(--quarantine-bg);
         border-left: 4px solid var(--quarantine-border);
@@ -97,7 +112,7 @@ st.markdown(
         padding: 1rem;
         margin: 0.5rem 0;
     }
-    
+
     .approved-box {
         background: var(--approved-bg);
         border-left: 4px solid var(--approved-border);
@@ -105,7 +120,7 @@ st.markdown(
         padding: 1rem;
         margin: 0.5rem 0;
     }
-    
+
     .stButton > button {
         background-color: var(--accent-primary) !important;
         color: white !important;
@@ -116,11 +131,11 @@ st.markdown(
         font-family: 'Inter', sans-serif !important;
         transition: background-color 0.15s ease !important;
     }
-    
+
     .stButton > button:hover {
         background-color: var(--accent-hover) !important;
     }
-    
+
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea {
         border: 1px solid var(--border-color) !important;
@@ -128,13 +143,13 @@ st.markdown(
         font-family: 'JetBrains Mono', monospace !important;
         font-size: 0.875rem !important;
     }
-    
+
     .stTextInput > div > div > input:focus,
     .stTextArea > div > div > textarea:focus {
         border-color: var(--accent-primary) !important;
         box-shadow: 0 0 0 2px var(--accent-light) !important;
     }
-    
+
     .metric-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
@@ -142,14 +157,14 @@ st.markdown(
         padding: 1rem;
         text-align: center;
     }
-    
+
     .metric-value {
         font-family: 'JetBrains Mono', monospace;
         font-size: 1.75rem;
         font-weight: 600;
         color: var(--accent-primary);
     }
-    
+
     .metric-label {
         font-size: 0.75rem;
         color: var(--text-secondary);
@@ -157,7 +172,7 @@ st.markdown(
         letter-spacing: 0.05em;
         margin-top: 0.25rem;
     }
-    
+
     .section-header {
         font-family: 'JetBrains Mono', monospace;
         font-size: 1rem;
@@ -167,7 +182,7 @@ st.markdown(
         padding-bottom: 0.5rem;
         border-bottom: 1px solid var(--border-color);
     }
-    
+
     .code-block {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.75rem;
@@ -177,11 +192,11 @@ st.markdown(
         border-radius: 6px;
         overflow-x: auto;
     }
-    
+
     .sidebar-content {
         padding: 0.5rem 0;
     }
-    
+
     .tenant-badge {
         display: inline-block;
         background: var(--accent-light);
@@ -197,12 +212,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Initialize session state
-if "documents" not in st.session_state:
-    st.session_state.documents = []
-if "stats" not in st.session_state:
-    st.session_state.stats = {"total": 0, "approved": 0, "quarantined": 0, "pending": 0}
-
 # Header
 st.markdown('<div class="main-header">🛡️ Secure RAG Brain</div>', unsafe_allow_html=True)
 st.markdown(
@@ -210,7 +219,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Sidebar - System Status
+# Sidebar - System Status & Supabase Connection
 with st.sidebar:
     st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
     st.markdown('<div class="section-header">⚙️ Core Infrastructure</div>', unsafe_allow_html=True)
@@ -218,9 +227,7 @@ with st.sidebar:
     # Status indicators
     col1, col2 = st.columns([1, 3])
     with col1:
-        st.markdown(
-            '<div class="status-indicator status-connected">●</div>', unsafe_allow_html=True
-        )
+        st.markdown('<div class="status-indicator status-connected">●</div>', unsafe_allow_html=True)
     with col2:
         st.markdown("**Database** — Connected (Supabase Postgres)")
 
@@ -238,10 +245,34 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Tenant selector
-    st.markdown(
-        '<div class="section-header">🔐 Active Tenant Context</div>', unsafe_allow_html=True
+    # Supabase Connection Config
+    st.markdown('<div class="section-header">🔗 Supabase Connection</div>', unsafe_allow_html=True)
+    supabase_url = st.text_input(
+        "Supabase URL",
+        value=st.session_state.get("SUPABASE_URL", ""),
+        placeholder="https://your-project.supabase.co",
+        help="Your Supabase project URL",
     )
+    supabase_anon_key = st.text_input(
+        "Anon Key",
+        value=st.session_state.get("SUPABASE_ANON_KEY", ""),
+        type="password",
+        placeholder="eyJhbGciOiJIUzI1NiIs...",
+        help="Supabase anon/public key",
+    )
+
+    if supabase_url and supabase_anon_key:
+        st.session_state["SUPABASE_URL"] = supabase_url
+        st.session_state["SUPABASE_ANON_KEY"] = supabase_anon_key
+        st.session_state.supabase = get_supabase_client(supabase_url, supabase_anon_key)
+        st.success("✅ Supabase client initialized")
+    elif st.session_state.supabase:
+        st.success("✅ Supabase client initialized")
+
+    st.markdown("---")
+
+    # Tenant selector
+    st.markdown('<div class="section-header">🔐 Active Tenant Context</div>', unsafe_allow_html=True)
     tenant_id = st.text_input(
         "JWT-Bound User ID",
         value="tenant-usr-489x-wells",
@@ -296,6 +327,8 @@ with st.sidebar:
         """,
             unsafe_allow_html=True,
         )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # Main content area - Two columns
 col1, col2 = st.columns([1, 1.2])
@@ -369,14 +402,12 @@ with col1:
     # Process submission
     if submit_btn and doc_title and uploaded_text:
         with st.spinner("Executing serverless compliance scan..."):
-            # Simulate async Lambda processing
+            import re
             import time
 
-            time.sleep(1.5)
+            time.sleep(1.5)  # Simulate async Lambda processing
 
             # Run PII detection
-            import re
-
             pii_patterns = {
                 "SSN": r"\b\d{3}-\d{2}-\d{4}\b",
                 "AWS Access Key": r"\b(AKIA|ASCA|ASIA)[A-Z0-9]{16}\b",
@@ -411,6 +442,23 @@ with col1:
                 "full_content": uploaded_text,
             }
 
+            # Try to persist to Supabase if connected
+            if st.session_state.supabase:
+                try:
+                    result = st.session_state.supabase.table("user_documents").insert({
+                        "id": doc_id,
+                        "user_id": tenant_id,
+                        "title": doc_title,
+                        "content": uploaded_text,
+                        "classification_status": status,
+                        "pii_detected": has_pii,
+                        "detected_pii_types": detected_types,
+                        "pii_matches": matches,
+                    }).execute()
+                    st.info(f"📝 Document persisted to Supabase (status: {status})")
+                except Exception as e:
+                    st.warning(f"Supabase write failed (demo mode): {e}")
+
             st.session_state.documents.insert(0, document)
 
             # Update stats
@@ -439,11 +487,63 @@ with col2:
         unsafe_allow_html=True,
     )
 
+    # Fetch from Supabase if connected
+    if st.session_state.supabase:
+        with st.spinner("Loading documents from Supabase..."):
+            try:
+                # Query approved documents
+                approved_result = st.session_state.supabase.table("user_documents")\
+                    .select("id, title, content, classification_status, pii_detected, detected_pii_types, pii_matches, created_at")\
+                    .eq("user_id", tenant_id)\
+                    .eq("classification_status", "approved")\
+                    .order("created_at", desc=True)\
+                    .execute()
+                
+                quarantined_result = st.session_state.supabase.table("user_documents")\
+                    .select("id, title, content, classification_status, pii_detected, detected_pii_types, pii_matches, created_at")\
+                    .eq("user_id", tenant_id)\
+                    .eq("classification_status", "quarantined")\
+                    .order("created_at", desc=True)\
+                    .execute()
+                
+                all_result = st.session_state.supabase.table("user_documents")\
+                    .select("id, title, content, classification_status, pii_detected, detected_pii_types, pii_matches, created_at")\
+                    .eq("user_id", tenant_id)\
+                    .order("created_at", desc=True)\
+                    .execute()
+
+                # Convert to session state format for display
+                def convert_docs(rows):
+                    return [{
+                        "id": row["id"][:8],
+                        "title": row["title"],
+                        "content": row["content"][:100] + ("..." if len(row["content"]) > 100 else ""),
+                        "status": row["classification_status"],
+                        "pii_types": row["detected_pii_types"] or [],
+                        "matches": row["pii_matches"] or {},
+                        "tenant": tenant_id,
+                        "timestamp": row["created_at"],
+                    } for row in rows]
+
+                approved_docs = convert_docs(approved_result.data)
+                quarantined_docs = convert_docs(quarantined_result.data)
+                all_docs = convert_docs(all_result.data)
+
+            except Exception as e:
+                st.warning(f"Supabase query failed, using local state: {e}")
+                approved_docs = [d for d in st.session_state.documents if d["status"] == "approved"]
+                quarantined_docs = [d for d in st.session_state.documents if d["status"] == "quarantined"]
+                all_docs = st.session_state.documents
+    else:
+        # Fallback to session state
+        approved_docs = [d for d in st.session_state.documents if d["status"] == "approved"]
+        quarantined_docs = [d for d in st.session_state.documents if d["status"] == "quarantined"]
+        all_docs = st.session_state.documents
+
     # Filter tabs
     tab1, tab2, tab3 = st.tabs(["🟢 Approved", "🔴 Quarantined", "⏳ All Documents"])
 
     with tab1:
-        approved_docs = [d for d in st.session_state.documents if d["status"] == "approved"]
         if approved_docs:
             for doc in approved_docs:
                 st.markdown(
@@ -463,7 +563,6 @@ with col2:
             )
 
     with tab2:
-        quarantined_docs = [d for d in st.session_state.documents if d["status"] == "quarantined"]
         if quarantined_docs:
             for doc in quarantined_docs:
                 pii_badges = "".join(
@@ -493,21 +592,22 @@ with col2:
             )
 
     with tab3:
-        if st.session_state.documents:
-            for doc in st.session_state.documents:
+        if all_docs:
+            for doc in all_docs:
                 status_badge = "🟢" if doc["status"] == "approved" else "🔴"
                 st.markdown(
                     f"""
-                    <div class="status-card" style="margin-bottom: 0.5rem;">
+                    <div class="{'approved-box' if doc['status'] == 'approved' else 'quarantine-box'}">
                         {status_badge} <strong>{doc["title"]}</strong> <span style="color: var(--text-secondary); font-size: 0.75rem;">({doc["id"]})</span><br>
-                        <span style="font-size: 0.75rem; color: var(--text-secondary);">{doc["timestamp"]} | {doc["tenant"]} | {doc["status"].upper()}</span>
+                        <span style="color: var(--text-secondary); font-size: 0.8rem;">{doc["timestamp"]} | {doc["tenant"]} | Status: {doc["status"]}</span><br>
+                        <span style="font-size: 0.75rem;">{doc["content"][:100]}...</span>
                     </div>
                 """,
                     unsafe_allow_html=True,
                 )
         else:
             st.markdown(
-                '<div class="status-card" style="text-align: center; color: var(--text-secondary);">No documents submitted yet. Use the ingress panel to begin.</div>',
+                '<div class="approved-box">No documents in registry. Submit your first document above.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -520,15 +620,15 @@ with st.expander("🏗️ Architecture Reference — Secure RAG Brain Data Flow"
     │   Client    │────▶│  API Gateway     │────▶│  S3 (Raw Land)  │────▶│  Lambda Triage   │
     │  (Streamlit)│     │  /ingest         │     │  Bucket         │     │  (PII Scanner)   │
     └─────────────┘     └──────────────────┘     └─────────────────┘     └────────┬─────────┘
-                                                                                   │
-                                                                                   ▼
+                                                                                    │
+                                                                                    ▼
     ┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌──────────────────┐
     │   Vector    │◀────│  Supabase        │◀────│  Classification │◀────│  Status Update   │
     │  Search UI  │     │  (pgvector +     │     │  Engine         │     │  (RLS Bypass)    │
     │             │     │   HNSW Index)    │     │                 │     │                  │
     └─────────────┘     └──────────────────┘     └─────────────────┘     └──────────────────┘
     ```
-    
+
     **Key Security Properties:**
     - **Zero-Trust Tenancy**: PostgreSQL RLS enforces `user_id = auth.uid()` at database layer
     - **Async PII Gate**: Lambda scans *before* vector embedding — contaminated text never reaches LLM context

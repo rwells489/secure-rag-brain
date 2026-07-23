@@ -5,6 +5,7 @@ import re
 # Initialize Supabase client (using service role key for RLS bypass)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 # PII detection patterns (regex-based, zero external dependencies)
 PII_PATTERNS = {
@@ -18,6 +19,37 @@ PII_PATTERNS = {
 
 # Classification thresholds
 QUARANTINE_THRESHOLD = 1  # Any PII detection triggers quarantine
+
+# OpenRouter client for embeddings (initialized lazily)
+_openrouter_client = None
+
+
+def _get_openrouter_client():
+    """Lazy-initialize OpenRouter client for embeddings."""
+    global _openrouter_client
+    if _openrouter_client is None and OPENROUTER_API_KEY:
+        from openai import OpenAI
+        _openrouter_client = OpenAI(
+            api_key=OPENROUTER_API_KEY,
+            base_url="https://openrouter.ai/api/v1",
+        )
+    return _openrouter_client
+
+
+def _generate_embedding(text: str) -> list[float] | None:
+    """Generate embedding via OpenRouter (free nomic-embed-text model)."""
+    client = _get_openrouter_client()
+    if not client:
+        return None
+    try:
+        response = client.embeddings.create(
+            model="nomic-ai/nomic-embed-text-v1.5",
+            input=text[:8000],  # Truncate to model max
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"Embedding generation failed: {e}")
+        return None
 
 
 def scan_for_pii(text: str) -> tuple[bool, list[str], dict[str, list[str]]]:
@@ -38,7 +70,7 @@ def scan_for_pii(text: str) -> tuple[bool, list[str], dict[str, list[str]]]:
 
 
 def update_document_classification(
-    document_id: str, status: str, pii_types: list[str], matches: dict
+    document_id: str, status: str, pii_types: list[str], matches: dict, embedding: list[float] | None = None
 ) -> bool:
     """
     Update document classification in Supabase using service role.
@@ -58,6 +90,8 @@ def update_document_classification(
         "detected_pii_types": pii_types,
         "pii_matches": matches,
     }
+    if embedding is not None:
+        payload["embedding"] = embedding
 
     response = requests.patch(url, headers=headers, json=payload)
     return response.status_code == 204
@@ -98,8 +132,17 @@ def lambda_handler(event, context):
             # Determine classification
             status = "quarantined" if has_pii else "approved"
 
+            # Generate embedding for approved documents
+            embedding = None
+            if status == "approved":
+                embedding = _generate_embedding(content)
+                if embedding:
+                    print(f"Generated embedding for document {document_id} ({len(embedding)} dims)")
+                else:
+                    print(f"Warning: Failed to generate embedding for {document_id}")
+
             # Update database
-            success = update_document_classification(document_id, status, pii_types, matches)
+            success = update_document_classification(document_id, status, pii_types, matches, embedding)
 
             results.append(
                 {

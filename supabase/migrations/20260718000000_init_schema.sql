@@ -23,3 +23,34 @@ using hnsw (embedding vector_cosine_ops);
 create index on user_documents (user_id) where classification_status = 'approved';
 create index on user_documents (user_id) where classification_status = 'quarantined';
 create index on user_documents (created_at desc);
+
+-- Vector search RPC function (RLS-aware, uses service role)
+create or replace function search_user_documents(
+  query_embedding vector(1536),
+  match_count int default 10,
+  filter_user_id uuid
+)
+returns table (
+  id uuid,
+  user_id uuid,
+  title text,
+  content text,
+  similarity float
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    d.id,
+    d.user_id,
+    d.title,
+    d.content,
+    1 - (d.embedding <=> query_embedding) as similarity
+  from user_documents d
+  where d.user_id = filter_user_id
+    and d.classification_status = 'approved'
+    and d.embedding is not null
+  order by d.embedding <=> query_embedding
+  limit match_count;
+$$;

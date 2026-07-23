@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Secure RAG Brain - Serverless PII Triage Pipeline
+Description: Secure RAG Brain - Serverless PII Triage Pipeline + Vector Search
 
 Parameters:
   SupabaseUrl:
@@ -14,6 +14,10 @@ Parameters:
     Type: String
     Description: S3 bucket for document uploads
     Default: secure-rag-brain-documents
+  OpenRouterApiKey:
+    Type: String
+    Description: OpenRouter API key for embeddings
+    NoEcho: true
 
 Resources:
   # S3 Bucket for document ingestion
@@ -52,6 +56,7 @@ Resources:
         Variables:
           SUPABASE_URL: !Ref SupabaseUrl
           SUPABASE_SERVICE_KEY: !Ref SupabaseServiceKey
+          OPENROUTER_API_KEY: !Ref OpenRouterApiKey
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref S3BucketName
@@ -63,7 +68,31 @@ Resources:
                 - logs:PutLogEvents
               Resource: "*"
 
-  # Permission for S3 to invoke Lambda
+  # Lambda Function for Vector Search
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: secure-rag-brain-search
+      Runtime: python3.11
+      Handler: search_handler.lambda_handler
+      CodeUri: .
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SERVICE_KEY: !Ref SupabaseServiceKey
+          OPENROUTER_API_KEY: !Ref OpenRouterApiKey
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "*"
+
+  # Permission for S3 to invoke Triage Lambda
   S3InvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -73,7 +102,7 @@ Resources:
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt DocumentsBucket.Arn
 
-  # API Gateway for manual invocation
+  # API Gateway for triage + search
   TriageApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -88,8 +117,44 @@ Resources:
         AllowMethods: "'POST,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: Secure RAG Brain API
+          version: "1.0"
+        paths:
+          /triage:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TriageFunction.Arn}/invocations
+                httpMethod: POST
+                payloadFormatVersion: "2.0"
+                type: aws_proxy
+              responses:
+                "200":
+                  description: Success
+              x-amazon-apigateway-cors:
+                allowMethods: "'POST,OPTIONS'"
+                allowHeaders: "'Content-Type,Authorization'"
+                allowOrigin: "'*'"
+          /search:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SearchFunction.Arn}/invocations
+                httpMethod: POST
+                payloadFormatVersion: "2.0"
+                type: aws_proxy
+              responses:
+                "200":
+                  description: Success
+              x-amazon-apigateway-cors:
+                allowMethods: "'POST,OPTIONS'"
+                allowHeaders: "'Content-Type,Authorization'"
+                allowOrigin: "'*'"
 
-  # IAM Role for Lambda (least privilege)
+  # IAM Role for Lambdas (least privilege)
   TriageFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -119,6 +184,9 @@ Outputs:
   TriageApiUrl:
     Value: !Sub "https://${TriageApi}.execute-api.${AWS::Region}.amazonaws.com/prod/triage"
     Description: API Gateway endpoint for manual triage
+  SearchApiUrl:
+    Value: !Sub "https://${TriageApi}.execute-api.${AWS::Region}.amazonaws.com/prod/search"
+    Description: API Gateway endpoint for vector search
   DocumentsBucketName:
     Value: !Ref DocumentsBucket
     Description: S3 bucket for document uploads
